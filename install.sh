@@ -1,9 +1,31 @@
 #!/usr/bin/env bash
 # live-explain (/lx) installer — batteries-included.
-# Installs the skill + alias into ~/.claude/skills and checks the two runtime deps.
+# Works both ways: run from a clone (./install.sh) OR piped detached
+# (curl -fsSL .../install.sh | sh) — in the piped case it fetches the payload itself.
 set -euo pipefail
+
+REPO_RAW="https://raw.githubusercontent.com/fire17/live-explain/main"
+REPO_GIT="https://github.com/fire17/live-explain"
 SKILLS="${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}"
-SRC="$(cd "$(dirname "$0")" && pwd)"
+
+# Where do the payload files live? Beside this script when run from a clone; otherwise
+# (curl | sh) there are no siblings, so materialize them into a cache dir.
+SRC="$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)"
+if [ -z "$SRC" ] || [ ! -f "$SRC/SKILL.md" ]; then
+  SRC="${LIVE_EXPLAIN_SRC:-$HOME/.live-explain/src}"
+  mkdir -p "$(dirname "$SRC")"
+  if command -v git >/dev/null 2>&1; then
+    rm -rf "$SRC"
+    git clone --depth 1 "$REPO_GIT" "$SRC" >/dev/null 2>&1 || { echo "✗ git clone failed"; exit 1; }
+  else
+    # no git — pull the three files directly
+    mkdir -p "$SRC/scripts" "$SRC/lx"
+    curl -fsSL "$REPO_RAW/SKILL.md"                -o "$SRC/SKILL.md"
+    curl -fsSL "$REPO_RAW/scripts/live_explain.py" -o "$SRC/scripts/live_explain.py"
+    curl -fsSL "$REPO_RAW/lx/SKILL.md"             -o "$SRC/lx/SKILL.md"
+  fi
+fi
+
 mkdir -p "$SKILLS/live-explain/scripts" "$SKILLS/lx"
 cp "$SRC/SKILL.md"                 "$SKILLS/live-explain/SKILL.md"
 cp "$SRC/scripts/live_explain.py"  "$SKILLS/live-explain/scripts/live_explain.py"
