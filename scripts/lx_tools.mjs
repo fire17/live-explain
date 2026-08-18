@@ -32,6 +32,8 @@ const RELAY_REGISTRY = process.env.RELAY_TARGETS || join(HERE, "relay-targets.js
 
 const TIMEOUT_MS = 4000;   // a voice call cannot wait longer than this without feeling broken
 const MAX_BUFFER = 1 << 20;
+const NET_TIMEOUT_MS = 8000; // network fetches need more than a local exec — a cold TLS/DNS
+                             // setup on the process's first request can eat several seconds
 const MAX_TOPIC = 200;     // the model is describing a subject, not pasting a document
 const MAX_CHARS = 2200;    // ~ what a voice model can usefully hold and summarise
 
@@ -58,6 +60,17 @@ export const tools = [
       required: [],
       additionalProperties: false,
     },
+  },
+  {
+    type: "function",
+    name: "load_context",
+    description:
+      "Reload your live context files — the working brief the MIND (the deep agent behind " +
+      "you) maintains continuously, plus its last-moment state note. Call it whenever the " +
+      "person asks what you are working on, what the current state is, or when your sense " +
+      "of the situation feels stale — the file on disk is always fresher than what you were " +
+      "told at launch. Returns the current text and how old it is.",
+    parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
   },
   {
     type: "function",
@@ -117,6 +130,14 @@ export const tools = [
       required: [],
       additionalProperties: false,
     },
+  },
+  {
+    type: "function",
+    name: "get_btc_price",
+    description:
+      "Get the current Bitcoin price in US dollars, live from a public exchange. Use whenever " +
+      "the person asks the BTC or bitcoin price/value — never guess it. Returns the current USD price.",
+    parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
   },
 ];
 
@@ -202,7 +223,7 @@ async function relay(a) {
         method: t.method || "POST",
         headers: { "content-type": "application/json", ...(t.headers || {}) },
         body: JSON.stringify({ [field]: text }),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(NET_TIMEOUT_MS),
       });
       return { ok: r.ok, target: name, status: r.status, result: (await r.text()).slice(0, 500) };
     }
@@ -242,8 +263,46 @@ function set_monitor(a) {
   }
 }
 
+/** Current Bitcoin price in USD, live from Coinbase's public spot endpoint (no key). */
+async function get_btc_price() {
+  try {
+    const r = await fetch("https://api.coinbase.com/v2/prices/BTC-USD/spot",
+      { headers: { accept: "application/json" }, signal: AbortSignal.timeout(NET_TIMEOUT_MS) });
+    if (!r.ok) return { ok: false, error: `price service returned ${r.status}` };
+    const amount = Number((await r.json())?.data?.amount);
+    if (!amount) return { ok: false, error: "no price in the response" };
+    return { ok: true, symbol: "BTC", currency: "USD", price: amount,
+      text: `Bitcoin is $${amount.toLocaleString("en-US", { maximumFractionDigits: 2 })} USD right now` };
+  } catch (e) {
+    return { ok: false, error: `could not fetch the price: ${String(e?.message ?? e).slice(0, 150)}` };
+  }
+}
+
 // The allow-list IS this object. Nothing else is callable, by construction.
-const HANDLERS = { reveal_more_context, get_current_time, relay, set_monitor };
+/** The three-part context law (fire17, 2026-08-18): 1) the persona (stable base) —
+ *  2) a live document the persona references, loadable mid-call via THIS tool —
+ *  3) the last-moment dynamic state the MIND writes just before (re)launching the call.
+ *  Parts 2+3 live here as files the MIND maintains; this tool reads both, read-only. */
+import { statSync } from "node:fs";
+import { homedir } from "node:os";
+function load_context() {
+  const read = (p) => {
+    try {
+      const text = readFileSync(p, "utf8").trim();
+      const ageS = Math.round((Date.now() - statSync(p).mtimeMs) / 1000);
+      return text ? { text, updated_seconds_ago: ageS } : null;
+    } catch { return null; }
+  };
+  const brief = read(join(homedir(), ".livemind", "context-brief.txt"));
+  const now = read(join(homedir(), ".livemind", "now.txt"));
+  if (!brief && !now) return { context: "No live context files found — the MIND has not written any yet." };
+  return {
+    ...(brief ? { working_brief: brief } : {}),
+    ...(now ? { last_moment_state: now } : {}),
+  };
+}
+
+const HANDLERS = { reveal_more_context, load_context, get_current_time, relay, set_monitor, get_btc_price };
 
 export async function onTool(name, args) {
   const fn = HANDLERS[name];
