@@ -37,6 +37,30 @@ Rules that make you use it *correctly*, not just successfully:
 
 Optional theme: `/lx pirate`, `/lx Jarvis`. Voice override: `LX_VOICE=<voice>`.
 
+## Voice tools, live monitoring, and monitors that speak back
+
+The call is not just one-way. `scripts/lx_tools.mjs` gives the voice persona an allow-listed
+tool bundle (by construction — a name that is not a handler never runs, no shell):
+
+- **`get_current_time`** — the exact clock (a voice model guesses otherwise).
+- **`reveal_more_context`** — re-reads this session's transcript for older/specific detail.
+- **`relay`** — sends text to a named destination from `scripts/relay-targets.json` (a note
+  file, `say`, a webhook…). The model picks a *name*, never a raw command or URL.
+- **`set_monitor`** — watch for **anything** (modelled on Claude Code's Monitor): a
+  `poll_until` shell test (`[ "$(date +%H:%M)" = "16:20" ]`) or a streaming `command`
+  (`tail -F log | grep --line-buffered ERROR`). When it fires, the report is **spoken into
+  the live call**.
+
+Enable the bundle with `LX_TOOLS=1`. The launching agent can also **watch the call live**:
+
+```bash
+python3 ~/.claude/skills/live-explain/scripts/lx_monitor.py --log <sidecar> --live   # words as spoken, both sides
+python3 ~/.claude/skills/live-explain/scripts/lx_monitor.py --wait 30                 # agent poll loop (exit 0 = ended)
+```
+
+Requires a recent **apiplan** (`apiplan talk --tools … --log …`, with the inbound inject
+channel). See `SKILL.md` for the full contract.
+
 ## Latency (measured, not claimed)
 
 `persona built in ~3ms` (local) + `first word in ~1798ms` (launch → first audible byte). The ~1.8s is the realtime voice link — bun start + OpenAI WebSocket connect + model first token — not local work. Both numbers print every run via an `LX_T0_MS` stamp.

@@ -1,0 +1,17 @@
+{
+  "_doc": "Relay targets for the voice `relay(target, text)` tool. The model may ONLY name a target defined here — never a raw command or URL — so this file is the entire trust boundary. kind=cli runs cmd+args with the text on stdin (no shell, no interpolation); kind=api POSTs {<field>: text} to url. Add your own; keep it to things you'd let a voice command trigger.",
+  "targets": {
+    "note": {
+      "kind": "cli",
+      "cmd": "tee",
+      "args": ["-a", "/tmp/relay-notes.txt"],
+      "desc": "append the text as a note to /tmp/relay-notes.txt"
+    },
+    "say": {
+      "kind": "cli",
+      "cmd": "say",
+      "args": [],
+      "desc": "speak the text aloud via the macOS say command"
+    }
+  }
+}
