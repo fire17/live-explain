@@ -53,8 +53,36 @@ def resolve_log(explicit: str, tag: str) -> str:
                 return p
         except (OSError, ValueError):
             pass
-    cands = glob.glob(os.path.join(CACHE, "talk-*.jsonl"))
-    return max(cands, key=os.path.getmtime) if cands else ""
+    return find_active_call()
+
+
+def _looks_like_talk(path: str) -> bool:
+    """A talk sidecar's first lines carry `ev`/`ws` fields (or the `talk start` banner) —
+    enough to tell one apart from any other .jsonl lying in /tmp."""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(400).decode("utf-8", "ignore")
+    except OSError:
+        return False
+    return '"ev"' in head or '"ws"' in head or "talk start" in head
+
+
+def find_active_call() -> str:
+    """The freshest talk sidecar anywhere it is normally written — the .cache dir AND the
+    temp dirs where ad-hoc `apiplan talk --log /tmp/...` calls land — so `--live` needs no
+    path. Override the search with LX_LIVE_GLOB (colon-separated glob patterns)."""
+    env_glob = os.environ.get("LX_LIVE_GLOB", "").strip()
+    pats = env_glob.split(":") if env_glob else [
+        os.path.join(CACHE, "talk-*.jsonl"),
+        "/tmp/*.jsonl", "/private/tmp/*.jsonl",
+        os.path.join(os.environ.get("TMPDIR", "").rstrip("/"), "*.jsonl") if os.environ.get("TMPDIR") else "",
+    ]
+    cands = set()
+    for p in pats:
+        if p:
+            cands.update(glob.glob(p))
+    talk = [f for f in cands if _looks_like_talk(f)]
+    return max(talk, key=os.path.getmtime) if talk else ""
 
 
 def _offset_file(log: str) -> str:
